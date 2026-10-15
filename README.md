@@ -85,8 +85,7 @@ That gets you valid JSON again, but still a few hundred bytes of envelope per to
 ## Install
 
 ```sh
-brew tap vivgrid/tap
-brew trust vivgrid/tap  # Homebrew 6+ asks you to trust third-party taps; once is enough
+brew tap vivgrid/tap && brew trust vivgrid/tap  # Homebrew 6+ asks you to trust third-party taps; once is enough
 brew install sjq
 ```
 
