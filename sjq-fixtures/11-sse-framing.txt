@@ -1,0 +1,18 @@
+: ping
+
+event: message
+data: {"id":"chatcmpl-11frame2v","object":"chat.completion.chunk","created":1792040112,"model":"gpt-4o-2024-08-06","choices":[{"index":0,"delta":{"role":"assistant"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-11frame2v",
+data: "object":"chat.completion.chunk","created":1792040112,
+data: "model":"gpt-4o-2024-08-06","choices":[{"index":0,"delta":{"content":"split"},"finish_reason":null}]}
+
+event: response.output_text.delta
+data: {"type":"response.output_text.delta"}
+
+data: {"id":"chatcmpl-11frame2v","object":"chat.completion.chunk","created":1792040112,"model":"gpt-4o-2024-08-06","custom_field":"demo","choices":[{"index":0,"delta":{"content":"custom"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-11frame-changed","object":"chat.completion.chunk","created":1792040112,"model":"gpt-4o-mini-2026-01-01","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}
+
+data: [DONE]
+

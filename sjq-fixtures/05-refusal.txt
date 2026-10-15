@@ -1,0 +1,7 @@
+data: {"id":"chatcmpl-05refuse2x","object":"chat.completion.chunk","created":1792040106,"model":"gpt-4o-2024-08-06","system_fingerprint":"fp_6f3a2b1c9d","choices":[{"index":0,"delta":{"role":"assistant","content":null,"refusal":null},"logprobs":null,"finish_reason":null}]}
+
+data: {"id":"chatcmpl-05refuse2x","object":"chat.completion.chunk","created":1792040106,"model":"gpt-4o-2024-08-06","system_fingerprint":"fp_6f3a2b1c9d","choices":[{"index":0,"delta":{"refusal":"I'm sorry, but I can't help with that."},"logprobs":null,"finish_reason":null}]}
+
+data: {"id":"chatcmpl-05refuse2x","object":"chat.completion.chunk","created":1792040106,"model":"gpt-4o-2024-08-06","system_fingerprint":"fp_6f3a2b1c9d","choices":[{"index":0,"delta":{},"logprobs":null,"finish_reason":"stop"}]}
+
+data: [DONE]

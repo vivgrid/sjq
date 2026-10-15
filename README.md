@@ -11,7 +11,7 @@ Pipe an LLM stream in. Get the tokens out, one per line, and a stopwatch.
 [![/v1/responses](https://img.shields.io/badge/speaks-%2Fv1%2Fresponses-bb9af7)](#responses-api)
 [![1 dependency](https://img.shields.io/badge/dependencies-1-9ece6a)](Cargo.toml)
 
-[Why](#why) · [Install](#install) · [Usage](#usage) · [Reading the output](#reading-the-output) · [Responses API](#responses-api) · [Timing](#timing)
+[Why](#why) · [jq parse error?](#jq-parse-error-invalid-numeric-literal) · [Install](#install) · [Usage](#usage) · [Reading the output](#reading-the-output) · [Responses API](#responses-api) · [Timing](#timing)
 
 <br>
 
@@ -46,6 +46,41 @@ reads the stream as it arrives and keeps only what each event *adds*:
   data: [DONE]
 + time: connect=0.3ms ttfb=308.7ms ttft=531.8ms first_content=1.119s total=1.416s speed=49.8tok/s
 ```
+
+## jq: parse error: Invalid numeric literal
+
+Searched for this error? You piped a streaming response into `jq`:
+
+```console
+$ curl -i "$BASE_URL/v1/chat/completions" -d '{"stream":true, …}' | jq
+jq: parse error: Invalid numeric literal at line 1, column 9
+```
+
+With `"stream": true` the response isn't one JSON document. It's
+[Server-Sent Events](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events/Using_server-sent_events):
+`data: {…}` lines (plus `event: …` lines on `/v1/responses`), separated by blank lines and
+ended by `data: [DONE]`. jq gives up at the first word that isn't JSON, and the column
+tells you which word it was:
+
+| the input starts with | jq says |
+|---|---|
+| `HTTP/1.1 200 OK`, the status line from `curl -i` | `jq: parse error: Invalid numeric literal at line 1, column 9` |
+| `data: {"id":…`, a `/v1/chat/completions` chunk | `jq: parse error: Invalid numeric literal at line 1, column 5` |
+| `event: response.created`, a `/v1/responses` event | `jq: parse error: Invalid numeric literal at line 1, column 6` |
+
+The fix is one word: put `sjq` where `jq` was. Headers from `-i` pass through untouched.
+
+```sh
+curl -iN "$BASE_URL/v1/chat/completions" … | sjq
+```
+
+Rather stay in jq? Read the lines raw, strip `data: ` and skip whatever isn't JSON:
+
+```sh
+curl -sN "$BASE_URL/v1/chat/completions" … | jq -cR 'ltrimstr("data: ") | fromjson? // empty'
+```
+
+That gets you valid JSON again, but still a few hundred bytes of envelope per token.
 
 ## Install
 

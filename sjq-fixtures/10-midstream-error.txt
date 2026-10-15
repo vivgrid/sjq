@@ -1,0 +1,7 @@
+data: {"id":"chatcmpl-10err9z","object":"chat.completion.chunk","created":1792040111,"model":"gpt-4o-2024-08-06","system_fingerprint":"fp_6f3a2b1c9d","choices":[{"index":0,"delta":{"role":"assistant","content":null},"logprobs":null,"finish_reason":null}]}
+
+data: {"id":"chatcmpl-10err9z","object":"chat.completion.chunk","created":1792040111,"model":"gpt-4o-2024-08-06","system_fingerprint":"fp_6f3a2b1c9d","choices":[{"index":0,"delta":{"content":"Partial answer…"},"logprobs":null,"finish_reason":null}]}
+
+data: {"error":{"message":"The server had an error processing your request. Sorry about that! You can retry your request, or contact us through our help center at help.openai.com if you keep seeing this error.","type":"server_error","param":null,"code":null}}
+
+data: [DONE]

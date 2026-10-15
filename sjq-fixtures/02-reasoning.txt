@@ -1,0 +1,15 @@
+data: {"id":"chatcmpl-02reason4d","object":"chat.completion.chunk","created":1792040103,"model":"deepseek-reasoner","choices":[{"index":0,"delta":{"role":"assistant","content":null,"reasoning_content":null},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-02reason4d","object":"chat.completion.chunk","created":1792040103,"model":"deepseek-reasoner","choices":[{"index":0,"delta":{"reasoning_content":"Let me think"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-02reason4d","object":"chat.completion.chunk","created":1792040103,"model":"deepseek-reasoner","choices":[{"index":0,"delta":{"reasoning_content":" step by step."},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-02reason4d","object":"chat.completion.chunk","created":1792040103,"model":"deepseek-reasoner","choices":[{"index":0,"delta":{"content":"The answer"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-02reason4d","object":"chat.completion.chunk","created":1792040103,"model":"deepseek-reasoner","choices":[{"index":0,"delta":{"content":" is 42."},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-02reason4d","object":"chat.completion.chunk","created":1792040103,"model":"deepseek-reasoner","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}
+
+data: {"id":"chatcmpl-02reason4d","object":"chat.completion.chunk","created":1792040103,"model":"deepseek-reasoner","choices":[],"usage":{"prompt_tokens":12,"completion_tokens":18,"total_tokens":30,"completion_tokens_details":{"reasoning_tokens":9}}}
+
+data: [DONE]
