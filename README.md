@@ -85,7 +85,15 @@ That gets you valid JSON again, but still a few hundred bytes of envelope per to
 ## Install
 
 ```sh
-cargo install --git https://github.com/fanweixiao/sjq
+brew tap vivgrid/tap
+brew trust vivgrid/tap  # Homebrew 6+ asks you to trust third-party taps; once is enough
+brew install sjq
+```
+
+Or build from source:
+
+```sh
+cargo install --git https://github.com/vivgrid/sjq
 ```
 
 One binary, one dependency (`serde_json`). Needs a recent stable Rust (edition 2024).
