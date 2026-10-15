@@ -1,9 +1,9 @@
 [package]
 name = "sjq"
-version = "0.1.0"
+version = "1.0.0"
 edition = "2024"
 description = "jq, but for AI streaming: read OpenAI-compatible chat completion and Responses API streams at a glance"
-repository = "https://github.com/fanweixiao/sjq"
+repository = "https://github.com/vivgrid/sjq"
 readme = "README.md"
 keywords = ["llm", "openai", "sse", "streaming", "cli"]
 categories = ["command-line-utilities", "development-tools::debugging"]
