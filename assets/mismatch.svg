@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 132" width="900" height="132" xml:space="preserve" font-family="ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,'Liberation Mono',monospace" font-size="13">
+<title>sjq flagging a skipped sequence_number in yellow and a .done text that disagrees with the deltas in red</title>
+<style>text{white-space:pre}</style>
+<rect x="0.5" y="0.5" width="899" height="131" rx="12" fill="#1a1b26" stroke="#2f334d"/>
+<text x="22" y="35"><tspan fill="#636d97">data:</tspan><tspan fill="#c0caf5"> </tspan><tspan fill="#7dcfff">output_item.added</tspan><tspan fill="#c0caf5"> message id=msg_1 role=assistant</tspan></text><text x="22" y="59"><tspan fill="#636d97">data:</tspan><tspan fill="#c0caf5"> 'Hel'</tspan></text><text x="22" y="83"><tspan fill="#636d97">data:</tspan><tspan fill="#c0caf5"> 'lo' </tspan><tspan fill="#e0af68">sequence_number=5</tspan></text><text x="422" y="83" fill="#e0af68" font-style="italic">← event 4 never arrived</text><text x="22" y="107"><tspan fill="#636d97">data:</tspan><tspan fill="#c0caf5"> </tspan><tspan fill="#7dcfff">output_text.done</tspan><tspan fill="#c0caf5"> </tspan><tspan fill="#f7768e">text='Help'</tspan></text><text x="422" y="107" fill="#f7768e" font-style="italic">← but the deltas spelled 'Hello'</text>
+</svg>
