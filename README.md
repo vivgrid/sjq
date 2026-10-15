@@ -4,8 +4,9 @@
 
 `jq` is built for whole JSON documents. A streaming LLM response is hundreds of `data: {...}`
 lines, each repeating the same id, model and `null`s around a few characters of new text.
-sjq reads an OpenAI-compatible `/v1/chat/completions` stream as it arrives and prints one
-short line per chunk with only what that chunk adds, then how long everything took.
+sjq reads an OpenAI-compatible `/v1/chat/completions` or `/v1/responses` stream as it
+arrives and prints one short line per event with only what that event adds, then how long
+everything took.
 
 Before:
 
@@ -70,7 +71,34 @@ sets coloring (`NO_COLOR` is honored).
   and every chunk stays on one line.
 - `id` and `model` show once per stream on the `meta:` line, and again when they change.
 - `usage` drops zero counters inside `*_details`.
-- Other lines (`event:`, `: ping` keep-alives, non-SSE error bodies) pass through unchanged.
+- Other lines (`event:`, `: ping` keep-alives, non-SSE error bodies) pass through unchanged,
+  except an `event:` line that only repeats the next payload's `type`.
+
+### Responses API
+
+`/v1/responses` streams typed events instead of chunks. sjq prints the event name without
+`response.`, and answer text the same way as chat content:
+
+```
+meta: created_at=1792038227 id=resp_0217… model=… reasoning={"effort":"medium"} service_tier=auto
+data: created status=in_progress
+data: output_item.added reasoning id=rs_0217… status=in_progress
+data: reasoning_summary_text='Simple'
+data: reasoning_summary_text.done
+data: output_item.added message role=assistant status=in_progress id=msg_0217…
+data: content_part.added output_text
+data: 'Here'
+data: output_text.done
+data: output_item.done message status=completed
+data: completed, usage: {"input_tokens":18,"output_tokens":87,"output_tokens_details":{"reasoning_tokens":3},"total_tokens":105}
+```
+
+- `item_id`, `output_index`, `content_index` and `summary_index` are only shown when they
+  change, for example when two function calls stream at once.
+- A `sequence_number` is only shown when it skips or goes backwards.
+- The `.done` events repeat the full text at every level (text, part, item, response). sjq
+  checks that text against the deltas it saw, hides it when it matches, and prints it in red
+  when it doesn't.
 
 ## Timing
 
@@ -80,7 +108,7 @@ sets coloring (`NO_COLOR` is honored).
 | `ttft` | first generated token: reasoning, content or tool call |
 | `first_content` | first answer token, when reasoning or a tool call came first |
 | `total` | last line received |
-| `speed` | `completion_tokens / (total - ttft)` |
+| `speed` | `completion_tokens` (or `output_tokens`) `/ (total - ttft)` |
 
 A pipe only carries the response body. With `curl … | sjq`, sjq measures from its own start,
 which is when the shell started curl, but it can't see the TCP connect. `sjq curl …` runs

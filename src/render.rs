@@ -1,5 +1,7 @@
-//! Turns OpenAI-compatible `/v1/chat/completions` SSE lines into one compact line per event,
-//! keeping only what a developer needs to see while a stream is flowing.
+//! Turns OpenAI-compatible `/v1/chat/completions` and `/v1/responses` SSE lines into one compact
+//! line per event, keeping only what a developer needs to see while a stream is flowing.
+
+mod responses;
 
 use serde_json::{Map, Value};
 
@@ -28,6 +30,9 @@ pub struct Renderer {
     /// Metadata (id, model, ...) of the stream in progress, so only changes get printed.
     meta: Map<String, Value>,
     timing: Timing,
+    /// An `event:` line held back until the next line shows whether it repeats a payload's `type`.
+    event: Option<String>,
+    responses: responses::State,
 }
 
 /// When things happened, in seconds since the request started.
@@ -52,27 +57,49 @@ impl Renderer {
             color,
             meta: Map::new(),
             timing: Timing::default(),
+            event: None,
+            responses: responses::State::default(),
         }
     }
 
     /// Renders one input line (without its line terminator), received `now` seconds after the
     /// request started, into zero or more output lines.
     pub fn line(&mut self, line: &str, now: f64) -> Vec<String> {
+        let mut out: Vec<String> = self.event.take().into_iter().collect();
         if line.trim().is_empty() {
-            return Vec::new(); // SSE event separators carry no information
+            return out; // SSE event separators carry no information
         }
         self.timing.last_line = Some(now);
+        if line.starts_with("event:") {
+            self.event = Some(line.to_owned());
+            return out;
+        }
         let Some(payload) = line.strip_prefix("data:") else {
-            return vec![line.to_owned()]; // event:, comments, curl -w output, ...
+            out.push(line.to_owned()); // comments, HTTP headers, curl -w output, ...
+            return out;
         };
         let payload = payload.strip_prefix(' ').unwrap_or(payload);
-        match serde_json::from_str(payload) {
-            Ok(Value::Object(chunk)) if BODY_FIELDS.iter().any(|k| chunk.contains_key(*k)) => {
-                self.observe(&chunk, now);
-                self.chunk(&chunk)
-            }
-            _ => vec![self.data(payload)], // [DONE], or a payload that isn't a chat chunk
+        let Ok(Value::Object(chunk)) = serde_json::from_str(payload) else {
+            out.push(self.data(payload)); // [DONE], or not JSON
+            return out;
+        };
+        let ty = chunk.get("type").and_then(Value::as_str);
+        // `event: response.created` says nothing that `"type":"response.created"` doesn't.
+        out.retain(|event| Some(event["event:".len()..].trim()) != ty);
+        if BODY_FIELDS.iter().any(|k| chunk.contains_key(*k)) {
+            self.observe(&chunk, now);
+            out.extend(self.chunk(&chunk));
+        } else if let Some(ty) = ty.filter(|ty| responses::is_event(ty)) {
+            out.extend(self.response_event(&chunk, ty, now));
+        } else {
+            out.push(self.data(payload)); // JSON that is neither kind of stream
         }
+        out
+    }
+
+    /// Output still held back when the input ends.
+    pub fn finish(&mut self) -> Vec<String> {
+        self.event.take().into_iter().collect()
     }
 
     /// The `time:` line: curl's connection timings (if any), then what sjq saw arrive itself.
@@ -113,12 +140,7 @@ impl Renderer {
             .flatten()
             .filter_map(|c| c.get("delta").or_else(|| c.get("message"))?.as_object());
         for (k, v) in deltas.flatten() {
-            let produced = match v {
-                Value::Null => false,
-                Value::String(s) => !s.is_empty(),
-                _ => true,
-            };
-            if produced && k != "role" {
+            if produced(v) && k != "role" {
                 t.first_token.get_or_insert(now);
                 if k == "content" {
                     t.first_content.get_or_insert(now);
@@ -133,7 +155,7 @@ impl Renderer {
 
     fn chunk(&mut self, chunk: &Map<String, Value>) -> Vec<String> {
         let mut out = Vec::new();
-        out.extend(self.meta(chunk));
+        out.extend(self.meta(chunk, &BODY_FIELDS));
 
         let mut parts = Vec::new();
         for choice in chunk
@@ -157,15 +179,16 @@ impl Renderer {
         out
     }
 
-    /// A `meta:` line with the top-level fields that are new or changed since the previous chunk.
-    fn meta(&mut self, chunk: &Map<String, Value>) -> Option<String> {
+    /// A `meta:` line with the fields of `obj` (a chunk, or a Responses API `response` object)
+    /// other than `body` that are new or changed since the previous one.
+    fn meta(&mut self, obj: &Map<String, Value>, body: &[&str]) -> Option<String> {
         let id = |m: &Map<String, Value>| m.get("id").filter(|v| !v.is_null()).cloned();
-        if id(chunk) != id(&self.meta) {
+        if id(obj) != id(&self.meta) {
             self.meta.clear(); // a new stream: show everything again
         }
         let mut changed = Vec::new();
-        for (k, v) in chunk {
-            if BODY_FIELDS.contains(&k.as_str()) || is_noise(k, v) {
+        for (k, v) in obj {
+            if body.contains(&k.as_str()) || is_noise(k, v) {
                 continue;
             }
             let seen = self.meta.get(k);
@@ -241,7 +264,29 @@ impl Renderer {
 
 /// Fields that repeat on every chunk without telling the reader anything.
 fn is_noise(key: &str, v: &Value) -> bool {
-    v.is_null() || key == "obfuscation" || (key == "object" && v == "chat.completion.chunk")
+    is_empty(v)
+        || key == "obfuscation"
+        || (key == "object" && (v == "chat.completion.chunk" || v == "response"))
+}
+
+/// `null`, `""`, `[]` and `{}`.
+fn is_empty(v: &Value) -> bool {
+    match v {
+        Value::Null => true,
+        Value::String(s) => s.is_empty(),
+        Value::Array(a) => a.is_empty(),
+        Value::Object(o) => o.is_empty(),
+        _ => false,
+    }
+}
+
+/// Whether a delta carries generated output, as opposed to an empty placeholder.
+fn produced(v: &Value) -> bool {
+    match v {
+        Value::Null => false,
+        Value::String(s) => !s.is_empty(),
+        _ => true,
+    }
 }
 
 /// `tool_calls[0] id=call_1 name=get_weather args='{"city":'`; `type=function` is implied.
@@ -360,10 +405,9 @@ mod tests {
 
     fn render(lines: &[&str]) -> Vec<String> {
         let mut r = Renderer::new(false);
-        lines
-            .iter()
-            .flat_map(|l| r.line(l, 0.0))
-            .collect::<Vec<_>>()
+        let mut out: Vec<String> = lines.iter().flat_map(|l| r.line(l, 0.0)).collect();
+        out.extend(r.finish());
+        out
     }
 
     #[test]

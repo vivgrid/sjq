@@ -2,7 +2,7 @@
 name = "sjq"
 version = "0.1.0"
 edition = "2024"
-description = "jq, but for AI streaming: read OpenAI-compatible chat completion streams at a glance"
+description = "jq, but for AI streaming: read OpenAI-compatible chat completion and Responses API streams at a glance"
 repository = "https://github.com/fanweixiao/sjq"
 readme = "README.md"
 keywords = ["llm", "openai", "sse", "streaming", "cli"]

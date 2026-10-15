@@ -11,7 +11,7 @@ use render::{CurlTiming, Renderer};
 const CURL_MARKER: &str = "@@sjq-curl-timing@@";
 
 const HELP: &str = "\
-sjq: read OpenAI-compatible /v1/chat/completions streams at a glance
+sjq: read OpenAI-compatible /v1/chat/completions and /v1/responses streams at a glance
 
 Usage: curl -N ... | sjq [OPTIONS]
        sjq [OPTIONS] curl [CURL ARGS]...
@@ -25,14 +25,21 @@ Each `data:` chunk becomes one line with only what it carries:
   data: finish_reason=stop, usage: {...}        final chunk (zero usage details dropped)
 id / model / created are printed once per stream on a `meta:` line, and again when
 they change. Unrecognized non-null fields are always shown. Other lines (event:,
-comments, curl -w output) pass through; blank lines are dropped.
+comments, curl -w output) pass through; blank lines are dropped, and so are event:
+lines that repeat the next payload's `type`.
+
+Responses API events print their type without `response.`, e.g. `data: 'Hi'` for an
+output_text.delta and `data: output_item.added message role=assistant id=msg_1`.
+item_id / output_index / *_index show only when they change, sequence_number only when
+it skips. Full text repeated by .done events is hidden when it matches the deltas and
+shown in red when it doesn't.
 
 When the stream ends, a `time:` line reports:
   connect, tls, ttfb   from curl, only in `sjq curl ...` mode
   ttft                 first generated token (reasoning, content or tool call)
   first_content        first answer token, if reasoning or a tool call came first
   total                last line received
-  speed                completion_tokens / (total - ttft)
+  speed                completion_tokens (or output_tokens) / (total - ttft)
 Times count from when sjq started, which in `curl ... | sjq` is when the shell started
 curl. A pipe only carries the body, so connect is only known when sjq runs curl itself:
 `sjq curl ...` adds `-N -sS -w ...` (replacing any -w of yours) and exits with curl's
@@ -191,10 +198,14 @@ impl Session<'_> {
         let mut buf = Vec::new();
         loop {
             buf.clear();
-            if input.read_until(b'\n', &mut buf)? == 0 {
+            let n = input.read_until(b'\n', &mut buf)?;
+            let now = self.start.elapsed().as_secs_f64();
+            if n == 0 {
+                for rendered in self.renderer.finish() {
+                    self.emit(now, &rendered)?;
+                }
                 return Ok(curl);
             }
-            let now = self.start.elapsed().as_secs_f64();
             let raw = String::from_utf8_lossy(&buf);
             let line = raw.trim_end_matches(['\n', '\r']);
             if let Some(timing) = line.strip_prefix(CURL_MARKER) {
