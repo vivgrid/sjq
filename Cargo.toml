@@ -1,0 +1,12 @@
+[package]
+name = "sjq"
+version = "0.1.0"
+edition = "2024"
+description = "jq, but for AI streaming: read OpenAI-compatible chat completion streams at a glance"
+repository = "https://github.com/fanweixiao/sjq"
+readme = "README.md"
+keywords = ["llm", "openai", "sse", "streaming", "cli"]
+categories = ["command-line-utilities", "development-tools::debugging"]
+
+[dependencies]
+serde_json = { version = "1.0.154", features = ["preserve_order"] }
