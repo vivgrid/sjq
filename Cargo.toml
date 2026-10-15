@@ -3,6 +3,7 @@ name = "sjq"
 version = "1.0.0"
 edition = "2024"
 description = "jq, but for AI streaming: read OpenAI-compatible chat completion and Responses API streams at a glance"
+license = "MIT"
 repository = "https://github.com/vivgrid/sjq"
 readme = "README.md"
 keywords = ["llm", "openai", "sse", "streaming", "cli"]
