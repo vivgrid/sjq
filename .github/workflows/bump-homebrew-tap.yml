@@ -1,0 +1,29 @@
+name: Bump Homebrew tap
+
+# `published` covers both flows: publishing a draft release, and creating a
+# release directly ("Draft New Release" -> "Publish release").
+# The existing Release workflow (triggered on `created`) builds and uploads
+# the release assets; this workflow waits for them if needed.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to bump the tap to (e.g. v1.1.0)'
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  bump-tap:
+    if: ${{ !github.event.release.prerelease }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Bump vivgrid/homebrew-tap Formula/sjq.rb
+        env:
+          TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: bash .github/scripts/bump-homebrew-tap.sh "${{ github.event.release.tag_name || github.event.inputs.tag }}"
