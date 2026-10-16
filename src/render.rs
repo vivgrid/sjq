@@ -3,6 +3,8 @@
 
 mod responses;
 
+use std::collections::HashMap;
+
 use serde_json::{Map, Value};
 
 pub const DIM: &str = "2";
@@ -32,6 +34,11 @@ pub struct Renderer {
     timing: Timing,
     /// An `event:` line held back until the next line shows whether it repeats a payload's `type`.
     event: Option<String>,
+    /// Where the line above streamed text to (a field, or an item's field), per choice, so a
+    /// delta that continues it can leave out the field name.
+    text: HashMap<u64, String>,
+    /// Whether the line being rendered streamed text.
+    streamed: bool,
     responses: responses::State,
 }
 
@@ -58,6 +65,8 @@ impl Renderer {
             meta: Map::new(),
             timing: Timing::default(),
             event: None,
+            text: HashMap::new(),
+            streamed: false,
             responses: responses::State::default(),
         }
     }
@@ -67,25 +76,27 @@ impl Renderer {
     pub fn line(&mut self, line: &str, now: f64) -> Vec<String> {
         let mut out: Vec<String> = self.event.take().into_iter().collect();
         if line.trim().is_empty() {
-            return out; // SSE event separators carry no information
+            return self.plain(out); // SSE event separators carry no information
         }
         self.timing.last_line = Some(now);
         if line.starts_with("event:") {
             self.event = Some(line.to_owned());
-            return out;
+            return self.plain(out);
         }
         let Some(payload) = line.strip_prefix("data:") else {
             out.push(line.to_owned()); // comments, HTTP headers, curl -w output, ...
-            return out;
+            return self.plain(out);
         };
         let payload = payload.strip_prefix(' ').unwrap_or(payload);
         let Ok(Value::Object(chunk)) = serde_json::from_str(payload) else {
             out.push(self.data(payload)); // [DONE], or not JSON
-            return out;
+            return self.plain(out);
         };
         let ty = chunk.get("type").and_then(Value::as_str);
         // `event: response.created` says nothing that `"type":"response.created"` doesn't.
         out.retain(|event| Some(event["event:".len()..].trim()) != ty);
+        let mut out = self.plain(out);
+        self.streamed = false;
         if BODY_FIELDS.iter().any(|k| chunk.contains_key(*k)) {
             self.observe(&chunk, now);
             out.extend(self.chunk(&chunk));
@@ -94,12 +105,52 @@ impl Renderer {
         } else {
             out.push(self.data(payload)); // JSON that is neither kind of stream
         }
+        if !self.streamed {
+            self.text.clear();
+        }
         out
+    }
+
+    /// Lines that stream no text, so a delta after them can't continue the text above.
+    fn plain(&mut self, out: Vec<String>) -> Vec<String> {
+        if !out.is_empty() {
+            self.text.clear();
+        }
+        out
+    }
+
+    /// `field='text'` for choice `choice`, or just `'text'` when the line above streamed into
+    /// the same `slot` of that choice, or when it's the answer (`answer`) and the choice
+    /// streamed nothing yet.
+    fn text_delta(
+        &mut self,
+        field: &str,
+        choice: u64,
+        slot: String,
+        v: &Value,
+        answer: bool,
+    ) -> String {
+        let continued = self.text.get(&choice).map_or(answer, |last| *last == slot);
+        // Bare JSON other than a string would read as something else; answers were always bare.
+        let named = !continued || (!answer && !v.is_string());
+        self.text.insert(choice, slot);
+        self.streamed = true;
+        if named {
+            format!("{field}={}", text(v))
+        } else {
+            text(v)
+        }
+    }
+
+    /// Records a line that was shown by something else (jq), so `total` still counts it.
+    pub fn received(&mut self, now: f64) {
+        self.timing.last_line = Some(now);
     }
 
     /// Output still held back when the input ends.
     pub fn finish(&mut self) -> Vec<String> {
-        self.event.take().into_iter().collect()
+        let out = self.event.take().into_iter().collect();
+        self.plain(out)
     }
 
     /// The `time:` line: curl's connection timings (if any), then what sjq saw arrive itself.
@@ -154,8 +205,8 @@ impl Renderer {
     }
 
     fn chunk(&mut self, chunk: &Map<String, Value>) -> Vec<String> {
-        let mut out = Vec::new();
-        out.extend(self.meta(chunk, &BODY_FIELDS));
+        let meta = self.meta(chunk, &BODY_FIELDS).into_iter().collect();
+        let mut out = self.plain(meta);
 
         let mut parts = Vec::new();
         for choice in chunk
@@ -202,14 +253,15 @@ impl Renderer {
         (!changed.is_empty()).then(|| self.paint(BLUE, &format!("meta: {}", changed.join(" "))))
     }
 
-    fn choice(&self, choice: &Value) -> Vec<String> {
+    fn choice(&mut self, choice: &Value) -> Vec<String> {
         let Some(choice) = choice.as_object() else {
             return vec![choice.to_string()];
         };
         let mut parts = Vec::new();
+        let index = choice.get("index").and_then(Value::as_u64).unwrap_or(0);
         for key in ["delta", "message"] {
             if let Some(delta) = choice.get(key).and_then(Value::as_object) {
-                parts.extend(self.delta(delta));
+                parts.extend(self.delta(delta, index));
             }
         }
         for (k, v) in choice {
@@ -223,34 +275,95 @@ impl Renderer {
                 field
             });
         }
-        if let Some(i) = choice
-            .get("index")
-            .and_then(Value::as_u64)
-            .filter(|&i| i > 0)
+        if index > 0
             && let Some(first) = parts.first_mut()
         {
-            *first = format!("[{i}] {first}");
+            *first = format!("[{index}] {first}");
         }
         parts
     }
 
-    fn delta(&self, delta: &Map<String, Value>) -> Vec<String> {
+    /// The `delta` (or `message`) of choice `choice`.
+    fn delta(&mut self, delta: &Map<String, Value>, choice: u64) -> Vec<String> {
+        let is_text = |k: &str| matches!(k, "content" | "refusal") || k.starts_with("reasoning");
+        // `"content":""` next to reasoning text is a placeholder, not an empty delta.
+        let has_text = delta.iter().any(|(k, v)| is_text(k) && produced(v));
         let mut parts = Vec::new();
         for (k, v) in delta {
-            if v.is_null() {
+            if v.is_null() || (has_text && is_text(k) && v == "") {
                 continue;
             }
             parts.push(match k.as_str() {
-                "content" => text(v),
+                "content" => self.text_delta(k, choice, k.to_owned(), v, true),
                 "role" => self.paint(CYAN, &format!("role={}", bare(v))),
-                "refusal" => self.paint(RED, &format!("refusal={}", text(v))),
-                "tool_calls" => self.paint(MAGENTA, &tool_calls(v)),
+                "refusal" => {
+                    let refusal = self.text_delta(k, choice, k.to_owned(), v, false);
+                    self.paint(RED, &refusal)
+                }
+                "tool_calls" => {
+                    let calls = self.tool_calls(v, choice);
+                    self.paint(MAGENTA, &calls)
+                }
                 // reasoning_content, reasoning, reasoning_details, ... keep the provider's name
-                k if k.starts_with("reasoning") => self.paint(DIM, &format!("{k}={}", text(v))),
+                k if k.starts_with("reasoning") => {
+                    let reasoning = self.text_delta(k, choice, k.to_owned(), v, false);
+                    self.paint(DIM, &reasoning)
+                }
                 k => format!("{k}={}", bare(v)),
             });
         }
         parts
+    }
+
+    /// `tool_calls[0] id=call_1 name=get_weather args='{"city":'`; `type=function` is implied,
+    /// and so is `tool_calls[0] args=` when the line above streamed the same arguments.
+    /// A missing `index` shows as `[?]` since it breaks most client SDKs.
+    fn tool_calls(&mut self, v: &Value, choice: u64) -> String {
+        let Some(calls) = v.as_array() else {
+            return format!("tool_calls={}", bare(v));
+        };
+        let mut rendered = Vec::new();
+        for call in calls {
+            let Some(call) = call.as_object() else {
+                rendered.push(format!("tool_calls[?]={}", bare(call)));
+                continue;
+            };
+            let index = call
+                .get("index")
+                .filter(|i| !i.is_null())
+                .map_or("?".to_owned(), bare);
+            let name = format!("tool_calls[{index}]");
+            let mut s = name.clone();
+            let mut args = None;
+            for (k, v) in call {
+                match (k.as_str(), v) {
+                    (_, Value::Null) | ("index", _) => {}
+                    ("type", v) if v == "function" => {}
+                    ("function", Value::Object(f)) => {
+                        for (fk, fv) in f {
+                            match (fk.as_str(), fv) {
+                                (_, Value::Null) => {}
+                                ("arguments", Value::String(a)) if a.is_empty() => {}
+                                ("arguments", a) => args = Some(a),
+                                (fk, fv) => s += &format!(" {fk}={}", bare(fv)),
+                            }
+                        }
+                    }
+                    (k, v) => s += &format!(" {k}={}", bare(v)),
+                }
+            }
+            if let Some(args) = args {
+                let field = format!("{name} args");
+                let delta = self.text_delta(&field, choice, field.clone(), args, false);
+                if s == name {
+                    s = delta; // nothing but arguments
+                } else {
+                    s += &format!(" args={}", text(args));
+                }
+            }
+            rendered.push(s);
+        }
+        rendered.join(", ")
     }
 
     fn data(&self, body: &str) -> String {
@@ -287,43 +400,6 @@ fn produced(v: &Value) -> bool {
         Value::String(s) => !s.is_empty(),
         _ => true,
     }
-}
-
-/// `tool_calls[0] id=call_1 name=get_weather args='{"city":'`; `type=function` is implied.
-/// A missing `index` shows as `[?]` since it breaks most client SDKs.
-fn tool_calls(v: &Value) -> String {
-    let Some(calls) = v.as_array() else {
-        return format!("tool_calls={}", bare(v));
-    };
-    let render = |call: &Value| {
-        let Some(call) = call.as_object() else {
-            return format!("tool_calls[?]={}", bare(call));
-        };
-        let index = call
-            .get("index")
-            .filter(|i| !i.is_null())
-            .map_or("?".to_owned(), bare);
-        let mut s = format!("tool_calls[{index}]");
-        for (k, v) in call {
-            match (k.as_str(), v) {
-                (_, Value::Null) | ("index", _) => {}
-                ("type", v) if v == "function" => {}
-                ("function", Value::Object(f)) => {
-                    for (fk, fv) in f {
-                        match (fk.as_str(), fv) {
-                            (_, Value::Null) => {}
-                            ("arguments", Value::String(a)) if a.is_empty() => {}
-                            ("arguments", a) => s += &format!(" args={}", text(a)),
-                            (fk, fv) => s += &format!(" {fk}={}", bare(fv)),
-                        }
-                    }
-                }
-                (k, v) => s += &format!(" {k}={}", bare(v)),
-            }
-        }
-        s
-    };
-    calls.iter().map(render).collect::<Vec<_>>().join(", ")
 }
 
 /// Drops nulls, plus zero counters and empty objects below the top level of `usage`,
@@ -452,9 +528,44 @@ mod tests {
             render(&lines),
             [
                 r"data: role=assistant, reasoning_content='it\'s'",
-                r"data: '\n\tC:\\ \u{1b}[2J'",
+                r"data: content='\n\tC:\\ \u{1b}[2J'",
                 "data: ''",
                 "data: (empty)",
+            ]
+        );
+    }
+
+    #[test]
+    fn field_names_only_change() {
+        let lines = [
+            r#"data: {"choices":[{"delta":{"reasoning_content":"Let me","content":""}}]}"#,
+            r#"data: {"choices":[{"delta":{"reasoning_content":" think"}}]}"#,
+            r#"data: {"choices":[{"index":1,"delta":{"reasoning_content":"Hm"}}]}"#,
+            r#"data: {"choices":[{"delta":{"reasoning_content":"."}}]}"#,
+            r#"data: {"choices":[{"delta":{"content":"The"}}]}"#,
+            r#"data: {"choices":[{"delta":{"content":" answer"}}]}"#,
+            ": keep-alive",
+            r#"data: {"choices":[{"delta":{"content":" is"}}]}"#,
+            r#"data: {"choices":[{"delta":{"reasoning_content":"Oh"}}]}"#,
+            r#"data: {"choices":[{"delta":{"reasoning_content":", wait"}}]}"#,
+            r#"data: {"choices":[{"delta":{},"finish_reason":null}]}"#,
+            r#"data: {"choices":[{"delta":{"reasoning_content":"!"}}]}"#,
+        ];
+        assert_eq!(
+            render(&lines),
+            [
+                "data: reasoning_content='Let me'",
+                "data: ' think'",
+                "data: [1] reasoning_content='Hm'",
+                "data: '.'",
+                "data: content='The'",
+                "data: ' answer'",
+                ": keep-alive",
+                "data: ' is'",
+                "data: reasoning_content='Oh'",
+                "data: ', wait'",
+                "data: (empty)",
+                "data: reasoning_content='!'",
             ]
         );
     }
@@ -464,6 +575,7 @@ mod tests {
         let lines = [
             r#"data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"get_weather","arguments":""}}]}}]}"#,
             r#"data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"city\":"}}]}}]}"#,
+            r#"data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\"Rome\""}}]}}]}"#,
             r#"data: {"choices":[{"index":0,"delta":{"tool_calls":[{"function":{"arguments":"1}"}}]}}]}"#,
             r#"data: {"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}"#,
         ];
@@ -472,6 +584,7 @@ mod tests {
             [
                 "data: tool_calls[0] id=call_1 name=get_weather",
                 r#"data: tool_calls[0] args='{"city":'"#,
+                r#"data: '"Rome"'"#,
                 "data: tool_calls[?] args='1}'",
                 "data: finish_reason=tool_calls",
             ]
@@ -587,5 +700,7 @@ mod tests {
         assert_eq!(r.summary(None), None, "nothing received yet");
         r.line(r#"{"error":{"message":"bad key"}}"#, 0.05);
         assert_eq!(r.summary(None).unwrap(), "time: total=50.0ms");
+        r.received(0.7);
+        assert_eq!(r.summary(None).unwrap(), "time: total=700.0ms");
     }
 }

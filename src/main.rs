@@ -2,7 +2,7 @@ mod render;
 
 use std::fs::File;
 use std::io::{self, BufRead, BufReader, IsTerminal, StdoutLock, Write};
-use std::process::{Command, ExitCode, Stdio};
+use std::process::{Child, ChildStdin, Command, ExitCode, Stdio};
 use std::time::Instant;
 
 use render::{CurlTiming, Renderer};
@@ -18,11 +18,14 @@ Usage: curl -N ... | sjq [OPTIONS]
        sjq [OPTIONS] [FILE]...
 
 Each `data:` chunk becomes one line with only what it carries:
-  data: role=assistant, '¡'                     first delta
-  data: reasoning_content=' user'               reasoning delta
-  data: ' in'                                   content delta
+  data: role=assistant                          first delta
+  data: reasoning_content='The'                 reasoning delta
+  data: ' user'                                 more of the field above
+  data: content='¡'                             content delta, after reasoning
+  data: ' in'                                   more content
   data: tool_calls[0] id=call_1 name=get_time   tool call delta
   data: finish_reason=stop, usage: {...}        final chunk (zero usage details dropped)
+Text fields are named only when they change, and content only right after other text.
 id / model / created are printed once per stream on a `meta:` line, and again when
 they change. Unrecognized non-null fields are always shown. Other lines (event:,
 comments, curl -w output) pass through; blank lines are dropped, and so are event:
@@ -33,6 +36,10 @@ output_text.delta and `data: output_item.added message role=assistant id=msg_1`.
 item_id / output_index / *_index show only when they change, sequence_number only when
 it skips. Full text repeated by .done events is hidden when it matches the deltas and
 shown in red when it doesn't.
+
+A JSON body that isn't a stream (a `\"stream\": false` response, an HTTP error) goes to jq:
+pretty in a terminal, one line otherwise. Without jq, or if jq can't parse it, it passes
+through as-is. -t doesn't prefix jq's lines.
 
 When the stream ends, a `time:` line reports:
   connect, tls, ttfb   from curl, only in `sjq curl ...` mode
@@ -60,6 +67,8 @@ struct Opts {
     curl: Option<Vec<String>>,
     time: bool,
     color: bool,
+    /// Whether stdout is a terminal, where jq pretty-prints JSON bodies instead of compacting them.
+    pretty: bool,
 }
 
 fn main() -> ExitCode {
@@ -127,6 +136,7 @@ fn parse_args() -> Result<Option<Opts>, String> {
         curl,
         time,
         color,
+        pretty: io::stdout().is_terminal(),
     }))
 }
 
@@ -136,6 +146,7 @@ fn run(opts: &Opts) -> io::Result<ExitCode> {
         renderer: Renderer::new(opts.color),
         out: io::stdout().lock(),
         start: Instant::now(),
+        jq: true,
     };
     if let Some(args) = &opts.curl {
         return session.curl(args);
@@ -167,6 +178,28 @@ struct Session<'a> {
     out: StdoutLock<'static>,
     /// When the request started: sjq's own start, or when it spawned curl.
     start: Instant,
+    /// Whether jq can be started; cleared once it couldn't.
+    jq: bool,
+}
+
+/// A JSON body (a `"stream": false` response, an HTTP error) that jq is printing.
+struct JsonBody {
+    jq: Child,
+    /// jq's input, until a write fails because jq quit.
+    stdin: Option<ChildStdin>,
+    /// The body as received, passed through as-is if jq can't print it.
+    raw: Vec<u8>,
+}
+
+impl JsonBody {
+    fn feed(&mut self, chunk: &[u8]) {
+        self.raw.extend_from_slice(chunk);
+        if let Some(stdin) = &mut self.stdin
+            && stdin.write_all(chunk).is_err()
+        {
+            self.stdin = None; // jq quit early, e.g. on a parse error
+        }
+    }
 }
 
 impl Session<'_> {
@@ -196,11 +229,16 @@ impl Session<'_> {
     fn pump(&mut self, mut input: impl BufRead) -> io::Result<Option<CurlTiming>> {
         let mut curl = None;
         let mut buf = Vec::new();
+        let mut json = None;
+        let mut sse = false;
         loop {
             buf.clear();
             let n = input.read_until(b'\n', &mut buf)?;
             let now = self.start.elapsed().as_secs_f64();
             if n == 0 {
+                if let Some(json) = json {
+                    self.end_json(json, now)?;
+                }
                 for rendered in self.renderer.finish() {
                     self.emit(now, &rendered)?;
                 }
@@ -212,10 +250,58 @@ impl Session<'_> {
                 curl = parse_curl_timing(timing);
                 continue;
             }
+            // SSE lines start with a field name or `:`, so a `{` before any `data:` starts a
+            // JSON body rather than a stream.
+            if json.is_none() && !sse && line.trim_start().starts_with('{') {
+                json = self.spawn_jq()?;
+            }
+            if let Some(json) = &mut json {
+                self.renderer.received(now);
+                json.feed(&buf);
+                continue;
+            }
+            sse |= line.starts_with("data:");
             for rendered in self.renderer.line(line, now) {
                 self.emit(now, &rendered)?;
             }
         }
+    }
+
+    /// Starts jq on a JSON body: pretty in a terminal, one line otherwise. `None` without jq.
+    fn spawn_jq(&mut self) -> io::Result<Option<JsonBody>> {
+        if !self.jq {
+            return Ok(None);
+        }
+        self.out.flush()?; // jq writes to the same stdout, after everything printed so far
+        let spawned = Command::new("jq")
+            .arg(if self.opts.color { "-C" } else { "-M" })
+            .args((!self.opts.pretty).then_some("-c"))
+            .args(["--unbuffered", "."])
+            .stdin(Stdio::piped())
+            .spawn();
+        let Ok(mut jq) = spawned else {
+            self.jq = false;
+            return Ok(None);
+        };
+        Ok(Some(JsonBody {
+            stdin: jq.stdin.take(),
+            jq,
+            raw: Vec::new(),
+        }))
+    }
+
+    /// Waits for jq to print the body, and passes the body through as-is if it couldn't.
+    fn end_json(&mut self, mut json: JsonBody, now: f64) -> io::Result<()> {
+        drop(json.stdin.take()); // EOF for jq
+        if json.jq.wait()?.success() {
+            return Ok(());
+        }
+        for line in String::from_utf8_lossy(&json.raw).lines() {
+            for rendered in self.renderer.line(line, now) {
+                self.emit(now, &rendered)?;
+            }
+        }
+        Ok(())
     }
 
     fn summary(&mut self, curl: Option<&CurlTiming>) -> io::Result<()> {
