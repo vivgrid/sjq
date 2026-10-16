@@ -1,6 +1,6 @@
 # sjq 测试数据 — chat completions 流式响应全覆盖
 
-14 个 fixture 文件，覆盖 OpenAI-compatible `/v1/chat/completions`（`stream: true`）响应的各种可能性。每个文件都是一段完整、可 replay 的 SSE 流，直接用 sjq 跑：
+15 个 fixture 文件，覆盖 OpenAI-compatible `/v1/chat/completions`（`stream: true`）响应的各种可能性。每个文件都是一段完整、可 replay 的 SSE 流，直接用 sjq 跑：
 
 ```sh
 sjq 01-basic-content.txt
@@ -24,8 +24,9 @@ cat 01-basic-content.txt | sjq
 | `10-midstream-error.txt` | 流中间出现 `{"error": {...}}`，然后 `[DONE]` | `data: error: {"message":"…",…}` |
 | `11-sse-framing.txt` | SSE framing 边界：`: ping` 注释、`event: message` 行、多行 `data:` 拼起的 JSON、`event:` 与下个 payload `type` 重复（应丢弃）、`custom_field` 未知字段、`model`/`id` 中途变化 | 注释透传；多行 data 拼成一个事件；重复的 event 行丢弃；`custom_field=demo` 显示；model/id 变化时重新显示 |
 | `12-tricky-text.txt` | 难搞的文本：空 delta `''`、纯空格、`\n`、`\t`、引号、反斜杠、emoji、中文 | 全部 quoted & escaped，每 chunk 一行：`''`、`'   '`、`'\n'`、`'👸🎉'`、`'中文测试'` |
-| `13-http-error.txt` | 非 SSE 的 HTTP 错误体（整段 JSON，无 `data:` 前缀） | 按非 SSE 错误透传 |
+| `13-http-error.txt` | 非 SSE 的 HTTP 错误体（整段 JSON，无 `data:` 前缀） | 交给 `jq` 格式化；没装 jq 时原样透传 |
 | `14-multi-choice.txt` | `n=2`：choices 数组里两个 index | 两个 choice 的 delta 分别渲染 |
+| `15-non-stream.txt` | `stream: false` 的非流式响应：一整个 pretty-printed `chat.completion` JSON | 交给 `jq`：终端里 pretty + 着色，管道里压成一行；没装 jq 时原样透传 |
 
 ## 备注
 

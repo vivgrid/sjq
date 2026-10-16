@@ -86,6 +86,11 @@ curl -sN "$BASE_URL/v1/chat/completions" … | jq -cR 'ltrimstr("data: ") | from
 
 That gets you valid JSON again, but still a few hundred bytes of envelope per token.
 
+With `"stream": false` the body is one JSON document, and sjq hands it to `jq` for you:
+pretty and colored in a terminal, compacted to one line when piped (an agent doesn't need
+the indentation), followed by the `time:` line. Without `jq` on your `PATH` it passes
+through as-is.
+
 ## Install
 
 ```sh
@@ -100,6 +105,7 @@ cargo install --git https://github.com/vivgrid/sjq
 ```
 
 One binary, one dependency (`serde_json`). Needs a recent stable Rust (edition 2024).
+`jq`, if installed, formats responses that aren't streams.
 
 ## Usage
 

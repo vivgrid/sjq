@@ -97,6 +97,11 @@ impl Renderer {
         out
     }
 
+    /// Records a line that was shown by something else (jq), so `total` still counts it.
+    pub fn received(&mut self, now: f64) {
+        self.timing.last_line = Some(now);
+    }
+
     /// Output still held back when the input ends.
     pub fn finish(&mut self) -> Vec<String> {
         self.event.take().into_iter().collect()
@@ -587,5 +592,7 @@ mod tests {
         assert_eq!(r.summary(None), None, "nothing received yet");
         r.line(r#"{"error":{"message":"bad key"}}"#, 0.05);
         assert_eq!(r.summary(None).unwrap(), "time: total=50.0ms");
+        r.received(0.7);
+        assert_eq!(r.summary(None).unwrap(), "time: total=700.0ms");
     }
 }
