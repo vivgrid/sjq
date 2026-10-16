@@ -46,6 +46,10 @@ reads the stream as it arrives and keeps only what each event *adds*:
   data: [DONE]
 + time: connect=0.3ms ttfb=308.7ms ttft=531.8ms first_content=1.119s total=1.416s speed=49.8tok/s
 ```
+That pays off in two places:
+
+- **For developers:** no more hunting through walls of `data:` lines for the one field you need. One short line per event, only the delta.
+- **For coding agents:** pipe the stream through sjq before it reaches your agent. The envelope never enters the context window, so the agent spends ~99% fewer input tokens on the stream.
 
 ## jq: parse error: Invalid numeric literal
 
