@@ -38,9 +38,9 @@ reads the stream as it arrives and keeps only what each event *adds*:
 + meta: id=021792034294732770d3492782dd10cc0a489fec0a72ead7e3e0d created=1792034296 model=viv-fast-2609
 + data: role=assistant, reasoning_content='The'
 - data: {"id":"021792034294732770d3492782dd10cc0a489fec0a72ead7e3e0d","created":1792034296,"model":"viv-fast-2609","object":"chat.completion.chunk","system_fingerprint":null,"obfuscation":null,"choices":[{"delta":{"reasoning_content":" user","refusal":null},"index":0,"logprobs":null}]}
-+ data: reasoning_content=' user'
++ data: ' user'
 - data: {"id":"021792034294732770d3492782dd10cc0a489fec0a72ead7e3e0d","created":1792034296,"model":"viv-fast-2609","object":"chat.completion.chunk","system_fingerprint":null,"obfuscation":null,"choices":[{"delta":{"content":"Hola","refusal":null},"index":0,"logprobs":null}]}
-+ data: 'Hola'
++ data: content='Hola'
 - data: {"id":"021792034294732770d3492782dd10cc0a489fec0a72ead7e3e0d","created":1792034296,"model":"viv-fast-2609","object":"chat.completion.chunk","system_fingerprint":null,"obfuscation":null,"choices":[{"delta":{"refusal":null},"finish_reason":"stop","index":0,"logprobs":null}],"usage":{"prompt_tokens":232,"completion_tokens":44,"total_tokens":276,"prompt_tokens_details":{"audio_tokens":0,"cached_tokens":0},"completion_tokens_details":{"accepted_prediction_tokens":0,"audio_tokens":0,"reasoning_tokens":24,"rejected_prediction_tokens":0}}}
 + data: finish_reason=stop, usage: {"prompt_tokens":232,"completion_tokens":44,"total_tokens":276,"completion_tokens_details":{"reasoning_tokens":24}}
   data: [DONE]
@@ -132,6 +132,10 @@ sjq curl -s "$BASE_URL/v1/chat/completions" \
   visible, and every chunk stays on one line.
 - **Reasoning keeps the provider's field name**: `reasoning_content`, `reasoning`,
   `reasoning_details`, whatever the server sends.
+- **A field is named when it changes.** A delta that continues the line above's text prints
+  just `' user'`, so `reasoning_content=` and `tool_calls[0] args=` appear once per run, and
+  `content=` marks where the answer starts after reasoning. An answer with nothing before it
+  is unnamed throughout.
 - **`meta:` appears once per stream**, and again only when `id`, `model` or anything else
   in the envelope changes.
 - **`usage` drops zero counters** inside `*_details`.
@@ -149,6 +153,7 @@ meta: created_at=1792038227 id=resp_0217… model=… reasoning={"effort":"mediu
 data: created status=in_progress
 data: output_item.added reasoning id=rs_0217… status=in_progress
 data: reasoning_summary_text='Simple'
+data: ' request'
 data: reasoning_summary_text.done
 data: output_item.added message role=assistant status=in_progress id=msg_0217…
 data: content_part.added output_text

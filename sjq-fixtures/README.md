@@ -13,8 +13,8 @@ cat 01-basic-content.txt | sjq
 | 文件 | 覆盖的场景 | 期望的 sjq 渲染要点 |
 |---|---|---|
 | `01-basic-content.txt` | 最基础：role → content deltas → `finish_reason=stop` → usage chunk（`choices: []`）→ `[DONE]` | `meta:` 只出现一次；`data: role=assistant, 'Hello'`；`data: ' there'`；`finish_reason=stop, usage: {...}` |
-| `02-reasoning.txt` | DeepSeek 式 `reasoning_content` 先行，再出 content（测 `first_content` timing） | `reasoning_content='…'` 用 provider 自己的字段名；usage 里 `reasoning_tokens` 保留 |
-| `03-tool-call.txt` | 单个 tool call：首 chunk 带 `id`/`name`，后续 chunk 只有 `arguments` 碎片 | `tool_calls[0] id=call_… name=get_weather`，然后 `args='…'` 逐段 |
+| `02-reasoning.txt` | DeepSeek 式 `reasoning_content` 先行，再出 content（测 `first_content` timing） | `reasoning_content='…'` 用 provider 自己的字段名，后续片段只写 `'…'`，转到 content 时标出 `content='…'`；usage 里 `reasoning_tokens` 保留 |
+| `03-tool-call.txt` | 单个 tool call：首 chunk 带 `id`/`name`，后续 chunk 只有 `arguments` 碎片 | `tool_calls[0] id=call_… name=get_weather`，然后 `tool_calls[0] args='…'`，后续碎片只写 `'…'` |
 | `04-parallel-tool-calls.txt` | 两个 tool call 交错（index 0/1） | 两组 id/name/args 各自归位，不串 |
 | `05-refusal.txt` | `refusal` 非空（模型拒绝） | refusal 文本正常显示；`finish_reason=stop` |
 | `06-logprobs.txt` | 非空 `logprobs`（`token`/`logprob`/`bytes`/`top_logprobs`） | 内容照常渲染；logprobs 不炸（sjq 可自行决定展示粒度） |

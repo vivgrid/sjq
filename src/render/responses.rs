@@ -93,7 +93,8 @@ impl Renderer {
                     let streamed = self.responses.streamed.entry(key.clone()).or_default();
                     streamed.push_str(s);
                 }
-                head.push(self.delta_text(base, delta));
+                let to = format!("{base} {}", key.as_deref().unwrap_or_default());
+                head.push(self.delta_text(base, to, delta));
             }
             None => head.push(self.paint(if name == "error" { RED } else { CYAN }, name)),
         }
@@ -146,12 +147,10 @@ impl Renderer {
     }
 
     /// `'Hi'` for answer text; `reasoning_summary_text=' The'` and so on for everything else,
-    /// styled like the chat completion fields.
-    fn delta_text(&self, base: &str, delta: &Value) -> String {
-        if base == "output_text" {
-            return text(delta);
-        }
-        let field = format!("{base}={}", text(delta));
+    /// styled like the chat completion fields. Like there, the line after names no field when
+    /// it continues the same text (`to`).
+    fn delta_text(&mut self, base: &str, to: String, delta: &Value) -> String {
+        let field = self.text_delta(base, 0, to, delta, base == "output_text");
         match base {
             b if b.starts_with("reasoning") => self.paint(DIM, &field),
             "refusal" => self.paint(RED, &field),
@@ -336,18 +335,19 @@ mod tests {
             "",
             r#"data: {"type":"response.output_item.added","output_index":0,"item":{"id":"rs_1","type":"reasoning","summary":[],"status":"in_progress"},"sequence_number":2}"#,
             r#"data: {"type":"response.reasoning_summary_part.added","item_id":"rs_1","output_index":0,"summary_index":0,"part":{"type":"summary_text","text":""},"sequence_number":3}"#,
-            r#"data: {"type":"response.reasoning_summary_text.delta","summary_index":0,"delta":"Easy","item_id":"rs_1","output_index":0,"sequence_number":4}"#,
-            r#"data: {"type":"response.reasoning_summary_text.done","summary_index":0,"item_id":"rs_1","output_index":0,"text":"Easy","sequence_number":5}"#,
-            r#"data: {"type":"response.reasoning_summary_part.done","item_id":"rs_1","output_index":0,"summary_index":0,"part":{"type":"summary_text","text":"Easy"},"sequence_number":6}"#,
-            r#"data: {"type":"response.output_item.done","output_index":0,"item":{"id":"rs_1","type":"reasoning","summary":[{"type":"summary_text","text":"Easy"}],"status":"completed"},"sequence_number":7}"#,
-            r#"data: {"type":"response.output_item.added","output_index":1,"item":{"type":"message","role":"assistant","content":[],"status":"in_progress","id":"msg_1"},"sequence_number":8}"#,
-            r#"data: {"type":"response.content_part.added","content_index":0,"item_id":"msg_1","output_index":1,"part":{"type":"output_text","text":"","annotations":[]},"sequence_number":9}"#,
-            r#"data: {"type":"response.output_text.delta","content_index":0,"delta":"Hi","item_id":"msg_1","output_index":1,"sequence_number":10,"logprobs":[],"obfuscation":"x1"}"#,
-            r#"data: {"type":"response.output_text.delta","content_index":0,"delta":" it's","item_id":"msg_1","output_index":1,"sequence_number":11,"logprobs":[]}"#,
-            r#"data: {"type":"response.output_text.done","content_index":0,"item_id":"msg_1","output_index":1,"text":"Hi it's","sequence_number":12,"logprobs":[]}"#,
-            r#"data: {"type":"response.content_part.done","content_index":0,"item_id":"msg_1","output_index":1,"part":{"type":"output_text","text":"Hi it's","annotations":[]},"sequence_number":13}"#,
-            r#"data: {"type":"response.output_item.done","output_index":1,"item":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Hi it's","annotations":[]}],"status":"completed","id":"msg_1"},"sequence_number":14}"#,
-            r#"data: {"type":"response.completed","sequence_number":15,"response":{"id":"resp_1","object":"response","created_at":1700000000,"model":"test-model","status":"completed","output":[{"status":"completed","id":"rs_1","type":"reasoning","summary":[{"type":"summary_text","text":"Easy"}]},{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Hi it's","annotations":[]}],"status":"completed","id":"msg_1"}],"usage":{"input_tokens":18,"input_tokens_details":{"cached_tokens":0},"output_tokens":5,"output_tokens_details":{"reasoning_tokens":1},"total_tokens":23},"error":null,"reasoning":{"effort":"medium"},"service_tier":"default"}}"#,
+            r#"data: {"type":"response.reasoning_summary_text.delta","summary_index":0,"delta":"Ea","item_id":"rs_1","output_index":0,"sequence_number":4}"#,
+            r#"data: {"type":"response.reasoning_summary_text.delta","summary_index":0,"delta":"sy","item_id":"rs_1","output_index":0,"sequence_number":5}"#,
+            r#"data: {"type":"response.reasoning_summary_text.done","summary_index":0,"item_id":"rs_1","output_index":0,"text":"Easy","sequence_number":6}"#,
+            r#"data: {"type":"response.reasoning_summary_part.done","item_id":"rs_1","output_index":0,"summary_index":0,"part":{"type":"summary_text","text":"Easy"},"sequence_number":7}"#,
+            r#"data: {"type":"response.output_item.done","output_index":0,"item":{"id":"rs_1","type":"reasoning","summary":[{"type":"summary_text","text":"Easy"}],"status":"completed"},"sequence_number":8}"#,
+            r#"data: {"type":"response.output_item.added","output_index":1,"item":{"type":"message","role":"assistant","content":[],"status":"in_progress","id":"msg_1"},"sequence_number":9}"#,
+            r#"data: {"type":"response.content_part.added","content_index":0,"item_id":"msg_1","output_index":1,"part":{"type":"output_text","text":"","annotations":[]},"sequence_number":10}"#,
+            r#"data: {"type":"response.output_text.delta","content_index":0,"delta":"Hi","item_id":"msg_1","output_index":1,"sequence_number":11,"logprobs":[],"obfuscation":"x1"}"#,
+            r#"data: {"type":"response.output_text.delta","content_index":0,"delta":" it's","item_id":"msg_1","output_index":1,"sequence_number":12,"logprobs":[]}"#,
+            r#"data: {"type":"response.output_text.done","content_index":0,"item_id":"msg_1","output_index":1,"text":"Hi it's","sequence_number":13,"logprobs":[]}"#,
+            r#"data: {"type":"response.content_part.done","content_index":0,"item_id":"msg_1","output_index":1,"part":{"type":"output_text","text":"Hi it's","annotations":[]},"sequence_number":14}"#,
+            r#"data: {"type":"response.output_item.done","output_index":1,"item":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Hi it's","annotations":[]}],"status":"completed","id":"msg_1"},"sequence_number":15}"#,
+            r#"data: {"type":"response.completed","sequence_number":16,"response":{"id":"resp_1","object":"response","created_at":1700000000,"model":"test-model","status":"completed","output":[{"status":"completed","id":"rs_1","type":"reasoning","summary":[{"type":"summary_text","text":"Easy"}]},{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Hi it's","annotations":[]}],"status":"completed","id":"msg_1"}],"usage":{"input_tokens":18,"input_tokens_details":{"cached_tokens":0},"output_tokens":5,"output_tokens_details":{"reasoning_tokens":1},"total_tokens":23},"error":null,"reasoning":{"effort":"medium"},"service_tier":"default"}}"#,
             "data: [DONE]",
         ];
         assert_eq!(
@@ -358,7 +358,8 @@ mod tests {
                 "data: in_progress",
                 "data: output_item.added reasoning id=rs_1 status=in_progress",
                 "data: reasoning_summary_part.added summary_text",
-                "data: reasoning_summary_text='Easy'",
+                "data: reasoning_summary_text='Ea'",
+                "data: 'sy'",
                 "data: reasoning_summary_text.done",
                 "data: reasoning_summary_part.done summary_text",
                 "data: output_item.done reasoning status=completed",

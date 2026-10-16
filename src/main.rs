@@ -18,11 +18,14 @@ Usage: curl -N ... | sjq [OPTIONS]
        sjq [OPTIONS] [FILE]...
 
 Each `data:` chunk becomes one line with only what it carries:
-  data: role=assistant, '¡'                     first delta
-  data: reasoning_content=' user'               reasoning delta
-  data: ' in'                                   content delta
+  data: role=assistant                          first delta
+  data: reasoning_content='The'                 reasoning delta
+  data: ' user'                                 more of the field above
+  data: content='¡'                             content delta, after reasoning
+  data: ' in'                                   more content
   data: tool_calls[0] id=call_1 name=get_time   tool call delta
   data: finish_reason=stop, usage: {...}        final chunk (zero usage details dropped)
+Text fields are named only when they change, and content only right after other text.
 id / model / created are printed once per stream on a `meta:` line, and again when
 they change. Unrecognized non-null fields are always shown. Other lines (event:,
 comments, curl -w output) pass through; blank lines are dropped, and so are event:
