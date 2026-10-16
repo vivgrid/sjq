@@ -1,6 +1,6 @@
 [package]
 name = "sjq"
-version = "1.0.0"
+version = "1.1.1"
 edition = "2024"
 description = "jq, but for AI streaming: read OpenAI-compatible chat completion and Responses API streams at a glance"
 license = "MIT"
